@@ -19,9 +19,9 @@ M.hidden = {}
 local transform_pos = vec3()
 local camera_pos = vec3()
 local function update(dt)
-  -- Get rotation/angular velocity from vehicle lua
+  -- Only collect transform info from vehicles we own (others are driven remotely)
   for vid, v in vehiclesIterator() do
-    if not M.inactive[vid] then
+    if not M.inactive[vid] and kissmp_vehiclemanager.ownership[vid] then
       v:queueLuaCommand("kissmp_vehicle.update_transform_info()")
     end
   end

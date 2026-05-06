@@ -4,6 +4,7 @@ local string_buffer = require("string.buffer")
 
 local nodes = {}
 local ref_nodes = {}
+local nodes_ready = false
 
 local last_node = 1
 local nodes_per_frame = 32
@@ -13,44 +14,39 @@ local node_pos_thresh_sqr = node_pos_thresh * node_pos_thresh
 
 M.test_quat = quat(0.707, 0, 0, 0.707)
 
-local function onKissMPVehLoaded()
+local function setup_nodes()
+  nodes = {}
+  ref_nodes = {}
   local force = obj:getPhysicsFPS()
-
   local ref = {
     v.data.refNodes[0].left,
     v.data.refNodes[0].up,
     v.data.refNodes[0].back,
     v.data.refNodes[0].ref,
   }
-
   local total_mass = 0
-  local inverse_rot =  quat(obj:getRotation()):inversed()
+  local inverse_rot = quat(obj:getRotation()):inversed()
   for _, node in pairs(v.data.nodes) do
     local node_mass = obj:getNodeMass(node.cid)
     local node_pos = inverse_rot * obj:getNodePosition(node.cid)
-    table.insert(
-      nodes,
-      {
-        node.cid,
-        node_mass * force,
-        true,
-        node_pos
-      }
-    )
-    --M.test_nodes_sync[node.cid] = vec3(obj:getNodePosition(node.cid))
+    table.insert(nodes, {node.cid, node_mass * force, true, node_pos})
     total_mass = total_mass + node_mass
   end
-
   for _, node in pairs(ref) do
-    table.insert(
-      ref_nodes,
-      {
-        node,
-        total_mass * force / 4,
-        true,
-        inverse_rot * obj:getNodePosition(node)
-      }
-    )
+    table.insert(ref_nodes, {node, total_mass * force / 4, true, inverse_rot * obj:getNodePosition(node)})
+  end
+  nodes_ready = true
+end
+
+local function onKissMPVehLoaded()
+  nodes_ready = false
+  -- Node setup is deferred to kissUpdateOwnership so we skip it for
+  -- owned vehicles (nodes are only needed to apply remote corrections)
+end
+
+local function kissUpdateOwnership(owned)
+  if not owned then
+    setup_nodes()
   end
 end
 
@@ -103,6 +99,7 @@ local velocity = vec3()
 local force = vec3()
 local angular_velocity = vec3()
 local function apply_linear_velocity(x, y, z)
+  if not nodes_ready then return end
   velocity:set(x, y, z)
   for k=1, #nodes do
     local node = nodes[k]
@@ -117,6 +114,7 @@ end
 local object_rotation = quat()
 local node_position = vec3()
 local function apply_linear_velocity_ang_torque(x, y, z, pitch, roll, yaw)
+  if not nodes_ready then return end
   velocity:set(x, y, z)
   -- 0.1 seems like the safe value we can use for low velocities
   -- NOTE: Doesn't work as well as expected
@@ -162,5 +160,6 @@ M.apply_linear_velocity = apply_linear_velocity
 M.send_vehicle_config = send_vehicle_config
 
 M.onKissMPVehLoaded = onKissMPVehLoaded
+M.kissUpdateOwnership = kissUpdateOwnership
 
 return M
