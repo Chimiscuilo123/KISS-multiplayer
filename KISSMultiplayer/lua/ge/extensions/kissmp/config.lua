@@ -90,10 +90,14 @@ local function load_config()
     end
   else
     config = deepcopy(defaults)
-    if Steam and Steam.isWorking and Steam.accountLoggedIn then
-      config.name = Steam.playerName
+  end
+
+  -- Set player name: Steam name if available, otherwise PC name
+  if not config["ui.name"] or config["ui.name"] == "" or config["ui.name"] == "Player" then
+    if Steam and Steam.isWorking and Steam.accountLoggedIn and Steam.playerName and Steam.playerName ~= "" then
+      config["ui.name"] = Steam.playerName
     else
-      config.name = "Unknown"
+      config["ui.name"] = os.getenv("COMPUTERNAME") or os.getenv("USERNAME") or "Player"
     end
   end
 
@@ -101,7 +105,6 @@ local function load_config()
     config["security.base_secret_v2"] = generate_base_secret()
   end
 
-  -- Always force permissions on — no popup needed
   config["security.public_scripting"] = true
   config["security.public_mods"] = true
 
