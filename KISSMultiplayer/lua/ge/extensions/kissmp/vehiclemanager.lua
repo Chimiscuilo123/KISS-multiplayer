@@ -3,8 +3,13 @@ local M = {}
 local string_buffer = require("string.buffer")
 
 local timer = 0
+local input_timer = 0
+local elec_timer = 0
 local generation = 0
 local meta_timer = 0
+
+local INPUT_RATE  = 1 / 10  -- 10 Hz: throttle, brake, steering, gearbox
+local ELEC_RATE   = 1 / 16  -- 16 Hz: lights, horn, ignition
 local colors_buffer = {}
 local plates_buffer = {}
 local first_vehicle = true
@@ -51,7 +56,7 @@ local function colors_eq(a, b)
   return color_eq(a[1], b[1]) and color_eq(a[2], b[2]) and color_eq(a[3], b[3])
 end
 
-local function send_vehicle_update(obj)
+local function send_vehicle_update(obj, send_input)
   if not kissmp_transform.local_transforms[obj:getID()] then return end
   local t = kissmp_transform.local_transforms[obj:getID()]
   if not t.input then return end
@@ -71,8 +76,8 @@ local function send_vehicle_update(obj)
       velocity = {velocity.x, velocity.y, velocity.z},
       angular_velocity = {t.vel_pitch, t.vel_roll, t.vel_yaw}
     },
-    electrics = t.input,
-    gearbox = t.gearbox,
+    electrics = send_input and t.input or nil,
+    gearbox = send_input and t.gearbox or nil,
     vehicle_id = obj:getID(),
     generation = generation,
     sent_at = get_current_time()
@@ -303,16 +308,27 @@ local function onUpdate(dt)
     meta_timer = meta_timer - 1
   end
 
-  local tick_time = (1/kissmp_network.connection.tickrate)
-  if timer <  tick_time then
-    timer = timer + dt
-  else
+  local tick_time = 1 / kissmp_network.connection.tickrate
+  timer       = timer       + dt
+  input_timer = input_timer + dt
+  elec_timer  = elec_timer  + dt
+
+  if timer >= tick_time then
     timer = timer - tick_time
+
+    local send_input = input_timer >= INPUT_RATE
+    local send_elec  = elec_timer  >= ELEC_RATE
+
+    if send_input then input_timer = input_timer - INPUT_RATE end
+    if send_elec  then elec_timer  = elec_timer  - ELEC_RATE  end
+
     for i, v in pairs(M.ownership) do
       local vehicle = getObjectByID(i)
       if vehicle and (not kissmp_transform.inactive[i]) then
-        send_vehicle_update(vehicle)
-        vehicle:queueLuaCommand("kissmp_electrics.send(); kissmp_controllers.send()")
+        send_vehicle_update(vehicle, send_input)
+        if send_elec then
+          vehicle:queueLuaCommand("kissmp_electrics.send(); kissmp_controllers.send()")
+        end
       end
     end
   end
@@ -377,11 +393,13 @@ local function update_vehicle(data)
 
   kissmp_transform.update_vehicle_transform(data)
   if not kissmp_transform.inactive[id] then
-    vehicle:queueLuaCommand(string.format(
-      [[kissmp_input.apply(%q)
-        kissmp_gearbox.apply(%q)]],
-      string_buffer.encode(data.electrics),
-      string_buffer.encode(data.gearbox)))
+    if data.electrics and data.gearbox then
+      vehicle:queueLuaCommand(string.format(
+        [[kissmp_input.apply(%q)
+          kissmp_gearbox.apply(%q)]],
+        string_buffer.encode(data.electrics),
+        string_buffer.encode(data.gearbox)))
+    end
   end
 end
 
